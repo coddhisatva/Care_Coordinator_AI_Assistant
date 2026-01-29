@@ -10,11 +10,19 @@ function App() {
   const [socket, setSocket] = useState<Socket | null>(null)
   const [connected, setConnected] = useState(false)
   const [patient, setPatient] = useState<Patient | null>(null)
-  const [messages, setMessages] = useState<Message[]>([])
+  const [messages, setMessages] = useState<Message[]>(() => {
+    const saved = localStorage.getItem('chat_messages')
+    return saved ? JSON.parse(saved) : []
+  })
   const [debugMode, setDebugMode] = useState(false)
   const [bookingProgress, setBookingProgress] = useState<string>('')
   const [toolCalls, setToolCalls] = useState<any[]>([])
   const [currentPatientId, setCurrentPatientId] = useState('1')
+  
+  // Save messages to localStorage
+  useEffect(() => {
+    localStorage.setItem('chat_messages', JSON.stringify(messages))
+  }, [messages])
   
   const getUserId = () => {
     let userId = localStorage.getItem('nurse_user_id')
@@ -110,6 +118,7 @@ function App() {
     setMessages([])
     setBookingProgress('')
     setToolCalls([])
+    localStorage.removeItem('chat_messages')
     socket.emit('reset')
   }
 
@@ -133,6 +142,7 @@ function App() {
       setBookingProgress('')
       setToolCalls([])
       setPatient(null)
+      localStorage.removeItem('chat_messages')
       
       // Reconnect with new patient
       socket.close()
