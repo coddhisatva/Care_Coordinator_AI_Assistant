@@ -7,7 +7,7 @@ import requests
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
 
-API_BASE = 'http://localhost:5000'
+API_BASE = 'http://localhost:5002'
 
 
 def get_providers_by_specialty(specialty: str) -> dict:

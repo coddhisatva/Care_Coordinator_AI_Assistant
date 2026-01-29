@@ -75,7 +75,7 @@ function App() {
 
   const loadPatientData = async (patientId: string) => {
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5002'
       const response = await fetch(`${apiUrl}/patient/${patientId}`)
       if (response.ok) {
         const data = await response.json()
@@ -105,17 +105,32 @@ function App() {
     socket.emit('reset')
   }
 
-  const nextPatient = () => {
+  const nextPatient = async () => {
     if (!socket || !connected) return
     
     const nextId = String(parseInt(currentPatientId) + 1)
-    setCurrentPatientId(nextId)
-    setMessages([])
-    setBookingProgress('')
-    setPatient(null)
     
-    // Reconnect with new patient
-    socket.close()
+    // Check if next patient exists
+    try {
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5002'
+      const response = await fetch(`${apiUrl}/patient/${nextId}`)
+      
+      if (!response.ok) {
+        alert(`No patient found with ID ${nextId}. End of patient list.`)
+        return
+      }
+      
+      setCurrentPatientId(nextId)
+      setMessages([])
+      setBookingProgress('')
+      setPatient(null)
+      
+      // Reconnect with new patient
+      socket.close()
+    } catch (error) {
+      console.error('Error checking next patient:', error)
+      alert('Error loading next patient')
+    }
   }
 
   return (

@@ -373,5 +373,5 @@ if __name__ == '__main__':
     else:
         print("⚠ Supabase connection not configured - check .env file")
     
-    print("Starting Flask server on http://localhost:5000")
-    app.run(debug=True)
+    print("Starting Flask server on http://localhost:5002")
+    app.run(debug=True, port=5002)

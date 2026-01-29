@@ -25,7 +25,7 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 # Store agents by session
 agents = {}
 
-API_BASE = os.getenv('API_BASE_URL', 'http://localhost:5000')
+API_BASE = os.getenv('API_BASE_URL', 'http://localhost:5002')
 
 
 def initialize_agent_for_patient(user_id: str, patient_id: str):
@@ -69,12 +69,8 @@ def handle_connect():
         # Check if agent exists and can resume
         existing_agent = agents.get(user_id)
         if existing_agent and str(existing_agent.patient.id) == patient_id:
-            # Resume existing conversation
+            # Resume existing conversation - don't send message, frontend keeps history
             print(f"Resuming conversation for user {user_id}")
-            emit('message', {
-                "text": "Connection resumed.",
-                "patient_name": existing_agent.patient.name
-            })
             return
         
         # New patient - initialize
