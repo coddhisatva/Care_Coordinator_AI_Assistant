@@ -33,6 +33,7 @@ class Agent:
         self.messages = []
         self.tool_map = TOOL_FUNCTIONS
         self.iteration_count = 0
+        self.tool_calls_log = []  # Track tool calls for debugging
         
         # Initialize conversation with system prompt and patient context
         patient_context = self._build_patient_context()
@@ -159,6 +160,13 @@ class Agent:
                         tool_name = tool_call.function.name
                         tool_args = json.loads(tool_call.function.arguments)
                         
+                        # Log tool call for debugging
+                        self.tool_calls_log.append({
+                            "tool": tool_name,
+                            "args": tool_args,
+                            "iteration": self.iteration_count
+                        })
+                        
                         # Execute tool
                         result = self._execute_tool(tool_name, tool_args)
                         
@@ -200,8 +208,13 @@ class Agent:
         """Get current booking progress summary."""
         return self.booking.summary()
     
+    def get_tool_calls(self) -> list:
+        """Get recent tool calls for debugging."""
+        return self.tool_calls_log[-10:]  # Last 10 calls
+    
     def reset_conversation(self):
         """Reset conversation but keep patient context."""
         self.messages = [self.messages[0]]  # Keep system prompt
         self.iteration_count = 0
         self.booking = AppointmentBooking(patient=self.patient)
+        self.tool_calls_log = []  # Clear tool calls log

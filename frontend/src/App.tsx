@@ -13,6 +13,7 @@ function App() {
   const [messages, setMessages] = useState<Message[]>([])
   const [debugMode, setDebugMode] = useState(false)
   const [bookingProgress, setBookingProgress] = useState<string>('')
+  const [toolCalls, setToolCalls] = useState<any[]>([])
   const [currentPatientId, setCurrentPatientId] = useState('1')
   
   const getUserId = () => {
@@ -44,7 +45,7 @@ function App() {
       setConnected(false)
     })
 
-    newSocket.on('message', (data: { text: string, patient_name?: string, booking_progress?: string }) => {
+    newSocket.on('message', (data: { text: string, patient_name?: string, booking_progress?: string, tool_calls?: any[] }) => {
       setMessages(prev => [...prev, {
         text: data.text,
         sender: 'agent',
@@ -58,6 +59,10 @@ function App() {
       
       if (data.booking_progress) {
         setBookingProgress(data.booking_progress)
+      }
+      
+      if (data.tool_calls) {
+        setToolCalls(data.tool_calls)
       }
     })
 
@@ -102,6 +107,7 @@ function App() {
     if (!socket || !connected) return
     setMessages([])
     setBookingProgress('')
+    setToolCalls([])
     socket.emit('reset')
   }
 
@@ -123,6 +129,7 @@ function App() {
       setCurrentPatientId(nextId)
       setMessages([])
       setBookingProgress('')
+      setToolCalls([])
       setPatient(null)
       
       // Reconnect with new patient
@@ -176,12 +183,32 @@ function App() {
         {debugMode && (
           <div className="w-80 bg-gray-100 border-l border-gray-200 overflow-y-auto p-4">
             <h3 className="font-semibold text-lg mb-3">Debug Panel</h3>
+            
+            <div className="mb-4">
+              <h4 className="font-medium text-sm text-gray-700 mb-1">Tool Calls</h4>
+              <div className="text-xs bg-white p-2 rounded border border-gray-300 max-h-60 overflow-y-auto">
+                {toolCalls.length > 0 ? (
+                  toolCalls.map((call, idx) => (
+                    <div key={idx} className="mb-2 pb-2 border-b border-gray-200 last:border-0">
+                      <div className="font-semibold text-blue-600">{call.tool}</div>
+                      <div className="text-gray-600 mt-1">
+                        {JSON.stringify(call.args, null, 2)}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-gray-500">No tool calls yet</div>
+                )}
+              </div>
+            </div>
+            
             <div className="mb-4">
               <h4 className="font-medium text-sm text-gray-700 mb-1">Booking Progress</h4>
               <pre className="text-xs bg-white p-2 rounded border border-gray-300 whitespace-pre-wrap">
                 {bookingProgress || 'No booking in progress'}
               </pre>
             </div>
+            
             <div>
               <h4 className="font-medium text-sm text-gray-700 mb-1">Connection Info</h4>
               <div className="text-xs bg-white p-2 rounded border border-gray-300">

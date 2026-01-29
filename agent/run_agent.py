@@ -106,9 +106,14 @@ def handle_message(data):
         # Agent processes (can take minutes - no timeout!)
         response = agent.chat(message_text)
         progress = agent.get_booking_progress()
+        tool_calls = agent.get_tool_calls()
         
         # Send response
-        emit('message', {"text": response, "booking_progress": progress})
+        emit('message', {
+            "text": response, 
+            "booking_progress": progress,
+            "tool_calls": tool_calls
+        })
         
     except Exception as e:
         print(f"Error handling message: {e}")
