@@ -250,34 +250,84 @@ def check_insurance(insurance_name: str) -> dict:
         dict with acceptance status
     """
     try:
-        sql = "SELECT name FROM insurances"
+        # Check if this specific insurance is accepted using ILIKE for case-insensitive match
+        sql = "SELECT id, name, accepted FROM insurances WHERE name ILIKE %s"
         
         response = requests.post(
             f'{API_BASE}/api/query',
-            json={'sql': sql}
+            json={'sql': sql, 'params': [f"%{insurance_name}%"]}
         )
         
         if response.status_code != 200:
             return {"error": f"Failed to query insurances: {response.text}"}
         
         data = response.json()
-        accepted_insurances = [ins['name'] for ins in data.get('results', [])]
+        results = data.get('results', [])
         
-        # Check for exact or partial match
-        insurance_lower = insurance_name.lower()
-        for accepted in accepted_insurances:
-            if insurance_lower in accepted.lower() or accepted.lower() in insurance_lower:
+        # Check if we found a match
+        if results:
+            insurance = results[0]
+            if insurance['accepted']:
                 return {
                     "accepted": True,
-                    "matched_name": accepted,
-                    "message": f"Yes, {accepted} is accepted"
+                    "matched_name": insurance['name'],
+                    "message": f"Yes, {insurance['name']} is accepted"
                 }
+            else:
+                return {
+                    "accepted": False,
+                    "matched_name": insurance['name'],
+                    "message": f"{insurance['name']} is in our system but is not currently accepted"
+                }
+        
+        # No match found - get list of accepted insurances
+        list_sql = "SELECT name FROM insurances WHERE accepted = TRUE"
+        list_response = requests.post(
+            f'{API_BASE}/api/query',
+            json={'sql': list_sql}
+        )
+        
+        accepted_list = []
+        if list_response.status_code == 200:
+            list_data = list_response.json()
+            accepted_list = [ins['name'] for ins in list_data.get('results', [])]
         
         return {
             "accepted": False,
-            "message": f"'{insurance_name}' is not in our accepted insurances list",
-            "accepted_insurances": accepted_insurances
+            "message": f"'{insurance_name}' not found in our system",
+            "accepted_insurances": accepted_list
         }
+    
+    except Exception as e:
+        return {"error": f"Tool error: {str(e)}"}
+
+
+def set_patient_insurance(patient_id: int, insurance_name: str) -> dict:
+    """
+    Set or update patient's insurance.
+    Creates new insurance record if it doesn't exist (marked as not accepted).
+    
+    Args:
+        patient_id: Patient ID
+        insurance_name: Insurance provider name
+    
+    Returns:
+        dict with success status and whether insurance is accepted
+    """
+    try:
+        response = requests.post(
+            f'{API_BASE}/api/set_patient_insurance',
+            json={
+                'patient_id': patient_id,
+                'insurance_name': insurance_name
+            }
+        )
+        
+        if response.status_code != 200:
+            error_data = response.json()
+            return {"error": error_data.get('error', 'Failed to set insurance')}
+        
+        return response.json()
     
     except Exception as e:
         return {"error": f"Tool error: {str(e)}"}

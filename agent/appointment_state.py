@@ -17,6 +17,7 @@ class Patient:
     pcp: str
     ehr_id: str
     notes: str
+    insurance: Optional[Dict] = None  # {"id": int, "name": str, "accepted": bool}
     referrals: List[Dict] = field(default_factory=list)
     appointments: List[Dict] = field(default_factory=list)
     
@@ -30,6 +31,7 @@ class Patient:
             pcp=data.get('pcp', ''),
             ehr_id=data.get('ehrId', ''),
             notes=data.get('notes', ''),
+            insurance=data.get('insurance'),
             referrals=data.get('referred_providers', []),
             appointments=data.get('appointments', [])
         )

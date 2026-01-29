@@ -10,6 +10,7 @@ from tools import (
     check_appointment_history,
     check_insurance,
     get_self_pay_rate,
+    set_patient_insurance,
     book_appointment,
     query_database
 )
@@ -168,6 +169,23 @@ TOOLS = [
             }
         },
         "function": get_self_pay_rate
+    },
+    {
+        "name": "set_patient_insurance",
+        "description": "Set or update a patient's insurance. Use this when nurse provides insurance information. If the insurance doesn't exist in our system, it will be added (marked as not accepted). Returns whether the insurance is accepted or if patient will need to self-pay.",
+        "parameters": {
+            "patient_id": {
+                "type": "integer",
+                "description": "The patient's ID number",
+                "required": True
+            },
+            "insurance_name": {
+                "type": "string",
+                "description": "The insurance provider name (e.g., 'Aetna', 'Cigna')",
+                "required": True
+            }
+        },
+        "function": set_patient_insurance
     },
     {
         "name": "book_appointment",
