@@ -5,13 +5,11 @@ Handles conversation loop, tool calling, and OpenAI integration.
 
 import os
 import json
-import re
 from typing import List, Dict, Optional, Callable
 from dotenv import load_dotenv
 import openai
-from tools import book_appointment
 
-from config import SYSTEM_PROMPT, GREETING_PROMPT, TOOLS, MAX_ITERATIONS, WARNING_THRESHOLD, WARNING_MESSAGE, MODEL
+from config import SYSTEM_PROMPT, GREETING_PROMPT, TOOLS, TOOL_FUNCTIONS, MAX_ITERATIONS, WARNING_THRESHOLD, WARNING_MESSAGE, MODEL
 from appointment_state import Patient, AppointmentBooking
 
 load_dotenv()
@@ -33,7 +31,7 @@ class Agent:
         self.booking = AppointmentBooking(patient=patient)
         self.model = model
         self.messages = []
-        self.tool_map = {tool['name']: tool['function'] for tool in TOOLS}
+        self.tool_map = TOOL_FUNCTIONS
         self.iteration_count = 0
         
         # Initialize conversation with system prompt and patient context
@@ -46,28 +44,46 @@ class Agent:
     def generate_initial_greeting(self) -> str:
         """
         Generate initial greeting using LLM based on patient context.
-        Agent crafts personalized greeting.
+        Agent can call tools (e.g., check insurance) during greeting.
         """
         try:
-            response = openai.chat.completions.create(
-                model=self.model,
-                messages=self.messages + [{
-                    "role": "user",
-                    "content": GREETING_PROMPT
-                }],
-                temperature=0.7,
-                max_tokens=300
-            )
-            
-            greeting = response.choices[0].message.content
-            
-            # Add greeting to conversation history
+            # Add greeting prompt
             self.messages.append({
-                "role": "assistant",
-                "content": greeting
+                "role": "user",
+                "content": GREETING_PROMPT
             })
             
-            return greeting
+            # Allow tool calls during greeting
+            while True:
+                response = openai.chat.completions.create(
+                    model=self.model,
+                    messages=self.messages,
+                    tools=TOOLS,
+                    temperature=0.7,
+                    max_tokens=300
+                )
+                
+                assistant_message = response.choices[0].message
+                self.messages.append(assistant_message)
+                
+                # If tool calls, execute them
+                if assistant_message.tool_calls:
+                    for tool_call in assistant_message.tool_calls:
+                        tool_name = tool_call.function.name
+                        tool_args = json.loads(tool_call.function.arguments)
+                        
+                        result = self._execute_tool(tool_name, tool_args)
+                        
+                        self.messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "name": tool_name,
+                            "content": json.dumps(result)
+                        })
+                    continue
+                
+                # No tool calls, return greeting
+                return assistant_message.content
         
         except Exception as e:
             # Fallback if LLM fails
@@ -121,65 +137,44 @@ class Agent:
                     "content": WARNING_MESSAGE
                 })
             
-            # Call OpenAI
+            # Call OpenAI with tools
             try:
                 response = openai.chat.completions.create(
                     model=self.model,
                     messages=self.messages,
+                    tools=TOOLS,
                     temperature=0.7,
                     max_tokens=1000
                 )
                 
-                assistant_message = response.choices[0].message.content
+                assistant_message = response.choices[0].message
                 
                 # Add assistant message to history
-                self.messages.append({
-                    "role": "assistant",
-                    "content": assistant_message
-                })
+                self.messages.append(assistant_message)
 
-				# Check if agent is ready to book
-                if self._ready_to_book(assistant_message):
-                    if self.booking.is_complete():
-                        # Use booking state to book
-                        booking_data = self.booking.to_booking_request()
-                        result = book_appointment(**booking_data)
+                # Check for tool calls (OpenAI native format)
+                if assistant_message.tool_calls:
+                    # Execute tools and add results
+                    for tool_call in assistant_message.tool_calls:
+                        tool_name = tool_call.function.name
+                        tool_args = json.loads(tool_call.function.arguments)
                         
-                        # Add result to conversation
-                        self.messages.append({
-                            "role": "user",
-                            "content": f"Booking result:\n{json.dumps(result, indent=2)}"
-                        })
+                        # Execute tool
+                        result = self._execute_tool(tool_name, tool_args)
                         
-                        # Continue to get agent's response about the booking
-                        continue
-                    else:
-                        # Not ready - tell agent what's missing
-                        missing = self.booking.missing_fields()
+                        # Add tool result to conversation
                         self.messages.append({
-                            "role": "user",
-                            "content": f"Cannot book yet. Still need: {', '.join(missing)}"
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "name": tool_name,
+                            "content": json.dumps(result)
                         })
-                        continue
-
-                # Check for tool calls
-                tool_calls = self._extract_tool_calls(assistant_message)
-                
-                if not tool_calls:
-                    # No tool calls, return response to user
-                    return assistant_message
-                
-                # Execute tools and add results
-                for tool_call in tool_calls:
-                    result = self._execute_tool(tool_call)
                     
-                    # Add tool result to conversation
-                    self.messages.append({
-                        "role": "user",
-                        "content": f"Tool result for {tool_call['name']}:\n{json.dumps(result, indent=2)}"
-                    })
+                    # Continue loop to get agent's response to tool results
+                    continue
                 
-                # Continue loop to process tool results
+                # No tool calls, return response to user
+                return assistant_message.content
                 
             except Exception as e:
                 error_message = f"Error calling OpenAI: {str(e)}"
@@ -189,113 +184,17 @@ class Agent:
         # Hit max iterations
         return "I've reached the maximum number of actions for this conversation. Let me summarize what we've done so far and we can continue with a fresh start if needed."
     
-    def _extract_tool_calls(self, message: str) -> List[Dict]:
-        """
-        Extract tool calls from assistant message.
-        Expected format: <tool_call>function_name(arg1="value", arg2=123)</tool_call>
-        """
-        tool_calls = []
-        pattern = r'<tool_call>(.*?)</tool_call>'
-        matches = re.findall(pattern, message, re.DOTALL)
-        
-        for match in matches:
-            # Parse function call
-            # Format: function_name(arg1="value", arg2=123)
-            func_pattern = r'(\w+)\((.*?)\)'
-            func_match = re.match(func_pattern, match.strip())
-            
-            if func_match:
-                func_name = func_match.group(1)
-                args_str = func_match.group(2)
-                
-                # Parse arguments
-                kwargs = {}
-                if args_str.strip():
-                    # Simple parsing - split by comma, handle quotes
-                    arg_pairs = re.findall(r'(\w+)=([^,]+)', args_str)
-                    for key, value in arg_pairs:
-                        # Clean up value
-                        value = value.strip()
-                        # Remove quotes if present
-                        if (value.startswith('"') and value.endswith('"')) or \
-                           (value.startswith("'") and value.endswith("'")):
-                            value = value[1:-1]
-                        # Try to convert to int if possible
-                        try:
-                            value = int(value)
-                        except ValueError:
-                            pass
-                        kwargs[key] = value
-                
-                tool_calls.append({
-                    "name": func_name,
-                    "arguments": kwargs
-                })
-        
-        return tool_calls
-
-	def _ready_to_book(self, message: str) -> bool:
-        """Detect if agent is trying to book appointment."""
-        message_lower = message.lower()
-        
-        # Look for booking indicators
-        booking_phrases = [
-            'book the appointment',
-            'book this appointment',
-            'create the appointment',
-            'schedule the appointment',
-            'confirm the booking',
-            'proceed with booking',
-            '<tool_call>book_appointment'
-        ]
-        
-        return any(phrase in message_lower for phrase in booking_phrases)
-    
-    def _execute_tool(self, tool_call: Dict) -> Dict:
+    def _execute_tool(self, tool_name: str, arguments: Dict) -> Dict:
         """Execute a tool and return its result."""
-        tool_name = tool_call['name']
-        arguments = tool_call['arguments']
-        
         if tool_name not in self.tool_map:
             return {"error": f"Unknown tool: {tool_name}"}
         
         try:
             tool_function = self.tool_map[tool_name]
             result = tool_function(**arguments)
-            
-            # Update booking state if relevant
-            self._update_booking_state(tool_name, arguments, result)
-            
             return result
         except Exception as e:
             return {"error": f"Tool execution failed: {str(e)}"}
-    
-    def _update_booking_state(self, tool_name: str, arguments: Dict, result: Dict):
-        """Update booking state based on tool results."""
-        # Track provider selection
-        if tool_name == "get_providers_by_specialty" and result.get('found'):
-            providers = result.get('providers', [])
-            if len(providers) == 1:
-                provider = providers[0]
-                self.booking.provider_id = provider['id']
-                self.booking.provider_name = f"Dr. {provider['first_name']} {provider['last_name']}"
-        
-        # Track location selection
-        if tool_name == "get_provider_locations" and result.get('found'):
-            locations = result.get('locations', [])
-            if len(locations) == 1:
-                location = locations[0]
-                self.booking.department_id = location['department_id']
-                self.booking.location_name = location['location_name']
-        
-        # Track appointment type determination
-        if tool_name == "check_appointment_history":
-            self.booking.appointment_type = result.get('appointment_type')
-        
-        # Track successful booking
-        if tool_name == "book_appointment" and result.get('success'):
-            # Booking complete - could trigger some state update
-            pass
     
     def get_booking_progress(self) -> str:
         """Get current booking progress summary."""
