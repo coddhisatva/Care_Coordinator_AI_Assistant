@@ -287,7 +287,10 @@ TOOLS = [
                     },
                     "params": {
                         "type": "array",
-                        "description": "Optional list of parameters for parameterized query"
+                        "description": "Optional list of parameters for parameterized query",
+                        "items": {
+                            "type": "string"
+                        }
                     }
                 },
                 "required": ["sql"]
