@@ -34,22 +34,25 @@ A nurse needs to book follow-up appointments for patient John Doe after a hospit
 
 ```
 care-coordinator/
-├── database/              # Database setup scripts (Phase 1)
+├── database/              # Database setup scripts (Phase 1) ✅
 │   ├── schema.sql
 │   ├── parse_data_sheet.py
 │   ├── seed_database.py
 │   └── test_db.py
 │
-├── api/                   # Backend API (Phase 2)
-│   └── flask-app.py
+├── api/                   # Backend API (Phase 2) ✅
+│   ├── flask-app.py
+│   └── test_api.py
 │
-├── agent/                 # AI Agent & Tools (Phase 3)
-│   ├── agent.py
-│   ├── tools.py
-│   ├── config.py
-│   └── appointment_state.py
+├── agent/                 # AI Agent & Tools (Phase 3) - Partial
+│   ├── agent.py          ✅ Core Agent class
+│   ├── tools.py          ✅ 8 tool implementations
+│   ├── config.py         ✅ System prompt & settings
+│   ├── appointment_state.py  ✅ State management
+│   ├── test_agent.py     ✅ Testing script
+│   └── run_agent.py      ⚠️ TODO - Agent server/main loop
 │
-├── frontend/              # React UI (Phase 4)
+├── frontend/              # React UI (Phase 4) - TODO
 │   └── src/
 │
 ├── data_sheet.txt         # Hospital reference data
@@ -90,9 +93,15 @@ Create a `.env` file in the root directory:
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_KEY=your_service_role_key_here
 
-# OpenAI
+# PostgreSQL Connection (for agent tools)
+# Get from: Supabase Dashboard → Database → Connection Pooling → Session pooler
+POSTGRES_CONNECTION_STRING=postgresql://postgres.xxx:[PASSWORD]@aws-0-us-east-1.pooler.supabase.com:6543/postgres
+
+# OpenAI (for agent)
 OPENAI_API_KEY=sk-your-key-here
 ```
+
+**Note:** You need the Session pooler connection string, not Direct connection.
 
 ---
 
@@ -178,39 +187,212 @@ Database is ready for use!
 
 ---
 
-## Phase 2: Backend API (TODO)
+## Phase 2: Backend API ✅
 
 ### Overview
-Extend Flask API to connect to Supabase and provide endpoints for querying data and booking appointments.
+Flask API extended with Supabase integration providing endpoints for agent tools to query data and book appointments.
 
-### Endpoints (Planned)
-- `GET /patient/<id>` - Get patient information (existing)
-- `POST /api/query` - Execute SQL queries
+### Endpoints
+- `GET /` - Health check
+- `GET /patient/<id>` - Get patient information with appointments and referrals
+- `POST /api/query` - Execute SQL SELECT queries (for agent tools)
 - `POST /api/book` - Book appointments
-- `GET /health` - Health check
 
 ### Setup Instructions
-*(To be completed)*
+
+1. **Ensure database is set up** (Phase 1 complete)
+
+2. **Install dependencies**
+```bash
+pip install flask flask-cors psycopg2-binary
+```
+
+3. **Add PostgreSQL connection string to .env**
+
+Get Session Pooler connection string from Supabase:
+- Dashboard → Database → Connection Pooling → Session pooler
+- Copy the full URI
+
+Add to `.env`:
+```bash
+POSTGRES_CONNECTION_STRING=postgresql://postgres.xxx:[PASSWORD]@aws-0-us-east-1.pooler.supabase.com:6543/postgres
+```
+
+4. **Run Flask API**
+```bash
+cd api
+python flask-app.py
+```
+
+Should see:
+```
+✓ Connected to Supabase
+✓ Connected to PostgreSQL for raw SQL queries
+Starting Flask server on http://localhost:5000
+```
+
+5. **Test API**
+```bash
+python test_api.py
+```
+
+All 4 tests should pass.
+
+### API Details
+
+**GET /patient/\<id\>**
+- Returns patient demographics, referrals, and appointment history
+- Queries Supabase with JOINs for complete data
+- Used by agent to load patient context
+
+**POST /api/query**
+- Accepts SQL SELECT queries with parameterized inputs
+- Executes via PostgreSQL connection for flexibility
+- Used by agent tools for custom queries
+- Security: Only allows SELECT statements
+
+**POST /api/book**
+- Books new appointment
+- Validates all required fields
+- Calculates arrival time based on appointment type
+- Returns confirmation with appointment details
+
+### Troubleshooting
+
+**"Database connection not configured"**
+- Check POSTGRES_CONNECTION_STRING in .env
+- Verify you're using Session pooler connection (not Direct connection)
+- Restart Flask after updating .env
 
 ---
 
-## Phase 3: AI Agent & Tools (TODO)
+## Phase 3: AI Agent & Tools (PARTIAL - run_agent.py TODO)
 
 ### Overview
-Implement OpenAI-powered conversational agent with tool-calling capabilities.
+OpenAI-powered conversational agent with tool-calling capabilities. Agent maintains conversation context, determines appointment requirements, and coordinates booking workflow.
 
-### Tools (Planned)
+### Components Completed ✅
+
+**agent.py** - Core Agent class
+- Conversation loop with OpenAI GPT-4
+- Tool call parsing and execution
+- Message history management
+- Max iteration safety (stops at 10 calls)
+- Booking state tracking
+
+**tools.py** - 8 Tool implementations
 - `get_providers_by_specialty` - Find providers by specialty
-- `get_provider_locations` - Get provider work locations
-- `get_available_times` - Check appointment availability
+- `get_provider_locations` - Get provider work locations  
+- `get_available_times` - Check appointment availability (single date or range)
 - `check_appointment_history` - Determine NEW vs ESTABLISHED
 - `check_insurance` - Verify insurance acceptance
 - `get_self_pay_rate` - Get cost without insurance
-- `book_appointment` - Final booking
-- `query_database` - General SQL queries
+- `book_appointment` - Final booking action
+- `query_database` - General SQL queries for flexibility
 
-### Setup Instructions
-*(To be completed)*
+All tools make HTTP requests to Flask API endpoints.
+
+**config.py** - Configuration
+- Complete system prompt with business rules
+- Tool definitions
+- Agent settings (model, max iterations)
+
+**appointment_state.py** - State management
+- `Patient` class - holds patient data from API
+- `AppointmentBooking` class - tracks booking progress
+- Helper methods for validation and formatting
+
+**test_agent.py** - Testing script
+- Interactive mode: chat with agent in terminal
+- Automated scenarios: run test conversations
+- Commands: `status`, `reset`, `quit`
+
+### Component Still TODO ⚠️
+
+**run_agent.py** - Agent server (main loop)
+- WebSocket server for frontend connection
+- Agent lifecycle management
+- Session persistence
+- Main conversation loop
+
+This will be completed before Phase 4 (Frontend).
+
+### Setup Instructions (Current Testing)
+
+1. **Install dependencies**
+```bash
+pip install openai
+```
+
+2. **Add OpenAI key to .env**
+```bash
+OPENAI_API_KEY=sk-your-key-here
+```
+
+3. **Test agent in terminal**
+
+Terminal 1 - Run Flask API:
+```bash
+cd api
+python flask-app.py
+```
+
+Terminal 2 - Run agent test:
+```bash
+cd agent
+python test_agent.py
+```
+
+Choose option 1 (Interactive) or 2 (Automated scenarios).
+
+### Testing
+
+**Interactive Mode:**
+```
+Nurse: I need to book orthopedics
+Agent: I see John has a referral for Orthopedics with Dr. House. Let me find available times...
+```
+
+**Commands:**
+- Type messages to chat with agent
+- `status` - Show current booking progress
+- `reset` - Clear conversation and start over
+- `quit` - Exit
+
+### Agent Behavior
+## Dev's notes: Workflow is still being determined. Don't necessarily trust below here.
+## Most files within agent.py prob need to be changed, including sys prompt in config, and making the actual file run_agent.py which contains the agent instance and flow/loop.
+## We curr have a test_agent.py file. Dev has ignored this so far. Unsure if it will help us or be worthwhile. 
+
+**Workflow:**
+1. Understands nurse's request (uses patient referrals for context)
+2. Makes tool calls to gather information
+3. Presents options to nurse (doesn't make decisions for them)
+4. Collects missing information through conversation
+5. Validates all requirements met
+6. Books appointment
+7. Provides confirmation
+
+**Business Logic:**
+- Determines NEW vs ESTABLISHED by checking 5-year history
+- Only books when all required fields collected
+- Validates times against office hours
+- Provides self-pay rates when insurance not accepted
+
+### Troubleshooting
+
+**"OPENAI_API_KEY not found"**
+- Add to .env file in root directory
+- Restart terminal/load environment
+
+**Agent makes too many tool calls**
+- System prompt includes 6-call warning
+- Hard limit at 10 iterations
+- Check if agent is stuck in loop
+
+**Tool calls fail**
+- Ensure Flask API is running
+- Check API endpoints return 200 status
 
 ---
 
@@ -241,11 +423,22 @@ python flask-app.py
 # Runs on http://localhost:5000
 ```
 
-**Frontend:**
+**Agent (Interactive Testing):**
+```bash
+# Terminal 1: Flask API must be running first
+cd api
+python flask-app.py
+
+# Terminal 2: Run agent test
+cd agent
+python test_agent.py
+```
+
+**Frontend:** *(Phase 4 - not yet implemented)*
 ```bash
 cd frontend
 npm run dev
-# Runs on http://localhost:5173
+# Will run on http://localhost:5173
 ```
 
 ### Testing
@@ -256,9 +449,18 @@ cd database
 python test_db.py
 ```
 
-**API:** *(To be added in Phase 2)*
+**API:**
+```bash
+cd api
+python test_api.py
+```
 
-**Agent:** *(To be added in Phase 3)*
+**Agent:**
+```bash
+cd agent
+python test_agent.py
+# Choose: 1) Interactive, 2) Automated, or 3) Both
+```
 
 ---
 

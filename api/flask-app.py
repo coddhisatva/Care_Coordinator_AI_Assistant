@@ -2,13 +2,16 @@
 # Phase 2: Extended with Supabase integration
 
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from dotenv import load_dotenv
-from supabase import create_client, Client
+from supabase import create_client
 import psycopg2
 from psycopg2.extras import RealDictCursor
+
+# Import helpers
+from api_helpers import calculate_arrival_time, format_date_for_api, format_time_for_api
 
 # Load environment variables
 load_dotenv()
@@ -26,63 +29,18 @@ if not SUPABASE_URL or not SUPABASE_KEY:
     print("API will not be able to connect to database")
     supabase = None
 else:
-    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Initialize PostgreSQL connection for raw SQL queries
 POSTGRES_CONNECTION = None
-if SUPABASE_URL:
-    # Extract Postgres connection details from Supabase URL
-    # Format: https://xxxxx.supabase.co
-    project_ref = SUPABASE_URL.replace('https://', '').replace('.supabase.co', '')
-    
+conn_string = os.getenv('POSTGRES_CONNECTION_STRING')
+
+if conn_string:
     try:
-        POSTGRES_CONNECTION = psycopg2.connect(
-            host=f"db.{project_ref}.supabase.co",
-            database="postgres",
-            user="postgres",
-            password=os.getenv('SUPABASE_DB_PASSWORD'),  # Need to add this to .env
-            port=5432
-        )
+        POSTGRES_CONNECTION = psycopg2.connect(conn_string)
         print("✓ Connected to PostgreSQL for raw SQL queries")
     except Exception as e:
         print(f"⚠ PostgreSQL connection failed: {e}")
-
-
-# ============================================
-# HELPER FUNCTIONS
-# ============================================
-
-def calculate_arrival_time(appointment_time: str, appointment_type: str) -> str:
-    """
-    Calculate arrival time based on appointment type.
-    NEW: 30 min early, ESTABLISHED: 10 min early
-    """
-    try:
-        time_obj = datetime.strptime(appointment_time, '%H:%M')
-        minutes_early = 30 if appointment_type == 'NEW' else 10
-        arrival = time_obj - timedelta(minutes=minutes_early)
-        return arrival.strftime('%H:%M')
-    except ValueError:
-        # Fallback if time format is wrong
-        return appointment_time
-
-
-def format_date_for_api(iso_date: str) -> str:
-    """Convert ISO date (2024-08-12) to API format (8/12/24)"""
-    try:
-        date_obj = datetime.strptime(iso_date, '%Y-%m-%d')
-        return date_obj.strftime('%-m/%d/%y')  # %-m removes leading zero
-    except ValueError:
-        return iso_date
-
-
-def format_time_for_api(time_24hr: str) -> str:
-    """Convert 24hr time (14:30) to 12hr format (2:30pm)"""
-    try:
-        time_obj = datetime.strptime(time_24hr, '%H:%M')
-        return time_obj.strftime('%-I:%M%p').lower()  # 2:30pm
-    except ValueError:
-        return time_24hr
 
 
 # ============================================
@@ -105,8 +63,11 @@ def get_patient(patient_id):
         return jsonify({"error": "Database connection not configured"}), 500
     
     try:
-        # Get patient data
-        patient_response = supabase.table('patients').select('*').eq('id', patient_id).execute()
+        # Get patient data with insurance
+        patient_response = supabase.table('patients').select('''
+            *,
+            insurances(id, name, accepted)
+        ''').eq('id', patient_id).execute()
         
         if not patient_response.data:
             return jsonify({"error": f"Patient {patient_id} not found"}), 404
@@ -158,6 +119,17 @@ def get_patient(patient_id):
             "referred_providers": referred_providers,
             "appointments": appointments
         }
+        
+        # Add insurance information if patient has one
+        if patient.get('insurances'):
+            insurance = patient['insurances']
+            response_data["insurance"] = {
+                "id": insurance['id'],
+                "name": insurance['name'],
+                "accepted": insurance['accepted']
+            }
+        else:
+            response_data["insurance"] = None
         
         return jsonify(response_data)
     
@@ -307,6 +279,88 @@ def book_appointment():
     except Exception as e:
         print(f"Booking error: {str(e)}")
         return jsonify({"error": f"Booking failed: {str(e)}"}), 500
+
+
+@app.route('/api/set_patient_insurance', methods=['POST'])
+def set_patient_insurance():
+    """
+    Set or update a patient's insurance.
+    Creates insurance record if it doesn't exist (marked as not accepted).
+    
+    Example request body:
+    {
+        "patient_id": 1,
+        "insurance_name": "Cigna"
+    }
+    """
+    if not supabase:
+        return jsonify({"error": "Database connection not configured"}), 500
+    
+    try:
+        data = request.json
+        
+        # Validate required fields
+        if 'patient_id' not in data or 'insurance_name' not in data:
+            return jsonify({"error": "Missing required fields: patient_id, insurance_name"}), 400
+        
+        patient_id = data['patient_id']
+        insurance_name = data['insurance_name'].strip()
+        
+        if not insurance_name:
+            return jsonify({"error": "insurance_name cannot be empty"}), 400
+        
+        # Check if insurance exists
+        existing = supabase.table('insurances') \
+            .select('id, name, accepted') \
+            .ilike('name', insurance_name) \
+            .execute()
+        
+        insurance_id = None
+        is_accepted = False
+        actual_name = insurance_name
+        
+        if existing.data:
+            # Insurance exists - use it
+            insurance_id = existing.data[0]['id']
+            is_accepted = existing.data[0]['accepted']
+            actual_name = existing.data[0]['name']
+        else:
+            # Insurance doesn't exist - create it (not accepted by default)
+            insert_result = supabase.table('insurances') \
+                .insert({'name': insurance_name, 'accepted': False}) \
+                .execute()
+            
+            if not insert_result.data:
+                return jsonify({"error": "Failed to create insurance record"}), 500
+            
+            insurance_id = insert_result.data[0]['id']
+            is_accepted = False
+        
+        # Update patient's insurance_id
+        update_result = supabase.table('patients') \
+            .update({'insurance_id': insurance_id}) \
+            .eq('id', patient_id) \
+            .execute()
+        
+        if not update_result.data:
+            return jsonify({"error": "Failed to update patient insurance"}), 500
+        
+        # Build response
+        response = {
+            "success": True,
+            "insurance_name": actual_name,
+            "accepted": is_accepted,
+            "message": f"Patient insurance set to {actual_name}"
+        }
+        
+        if not is_accepted:
+            response["message"] += " (NOTE: This insurance is not currently accepted. Patient will need to self-pay.)"
+        
+        return jsonify(response)
+    
+    except Exception as e:
+        print(f"Set insurance error: {str(e)}")
+        return jsonify({"error": f"Failed to set insurance: {str(e)}"}), 500
 
 
 # ============================================
