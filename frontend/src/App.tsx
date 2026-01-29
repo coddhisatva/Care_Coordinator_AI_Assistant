@@ -38,6 +38,8 @@ function App() {
     newSocket.on('connect', () => {
       console.log('Connected to agent')
       setConnected(true)
+      // Load patient immediately on connect
+      loadPatientData(currentPatientId)
     })
 
     newSocket.on('disconnect', () => {
