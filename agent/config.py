@@ -15,6 +15,21 @@ from tools import (
     query_database
 )
 
+# Greeting prompt for initial message generation
+GREETING_PROMPT = """Generate your initial greeting to the nurse for this patient. 
+
+Be concise and professional. Your greeting should:
+1. Briefly introduce yourself as the booking assistant
+2. Mention the patient's name
+3. If the patient has insurance that is NOT accepted, clearly state they'll need to self-pay
+4. If the patient has referrals, briefly mention them (specialty and provider if available)
+5. Ask what details the nurse can provide to get started
+
+Example format:
+"Hi! I'm here to help book an appointment for John Doe. I see a referral for Orthopedics with Dr. Smith. What details can you provide to get started?"
+
+Now generate the greeting for the current patient based on their information."""
+
 # System prompt for Care Coordinator Agent
 SYSTEM_PROMPT = """You are a Care Coordinator Assistant helping hospital nurses book patient appointments.
 
@@ -252,3 +267,6 @@ TOOLS = [
 MAX_ITERATIONS = 10
 WARNING_THRESHOLD = 6
 MODEL = "gpt-4"  # or "gpt-4-turbo" or "gpt-3.5-turbo"
+
+# Warning system message
+WARNING_MESSAGE = "Note: You have made 6 tool calls. Most tasks should complete in 4-8 calls, and your limit is 10. Keep this in mind as you continue to drive towards booking an appointment while being helpful to the nurse."

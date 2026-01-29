@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 import openai
 from tools import book_appointment
 
-from config import SYSTEM_PROMPT, TOOLS, MAX_ITERATIONS, WARNING_THRESHOLD, MODEL
+from config import SYSTEM_PROMPT, GREETING_PROMPT, TOOLS, MAX_ITERATIONS, WARNING_THRESHOLD, WARNING_MESSAGE, MODEL
 from appointment_state import Patient, AppointmentBooking
 
 load_dotenv()
@@ -42,6 +42,36 @@ class Agent:
             "role": "system",
             "content": SYSTEM_PROMPT + "\n\n" + patient_context
         })
+    
+    def generate_initial_greeting(self) -> str:
+        """
+        Generate initial greeting using LLM based on patient context.
+        Agent crafts personalized greeting.
+        """
+        try:
+            response = openai.chat.completions.create(
+                model=self.model,
+                messages=self.messages + [{
+                    "role": "user",
+                    "content": GREETING_PROMPT
+                }],
+                temperature=0.7,
+                max_tokens=300
+            )
+            
+            greeting = response.choices[0].message.content
+            
+            # Add greeting to conversation history
+            self.messages.append({
+                "role": "assistant",
+                "content": greeting
+            })
+            
+            return greeting
+        
+        except Exception as e:
+            # Fallback if LLM fails
+            return f"Hi! I'm here to help book an appointment for {self.patient.name}. What details can you provide?"
     
     def _build_patient_context(self) -> str:
         """Build patient context string for system prompt."""
@@ -88,7 +118,7 @@ class Agent:
             if self.iteration_count == WARNING_THRESHOLD:
                 self.messages.append({
                     "role": "system",
-                    "content": f"You have made {WARNING_THRESHOLD} tool calls. Most tasks should complete in 4-8 calls. Reassess your approach and work toward completion."
+                    "content": WARNING_MESSAGE
                 })
             
             # Call OpenAI
